@@ -30,6 +30,8 @@ type Chain struct {
 	Path         []int      // The callbacks that consist the chain
 	Period_us    int        // The period of the chain timer (microseconds)
 	Utilisation  float64    // How much time is spent on the CPU
+	Random_seed  int        // Seed used when generating this chain
+	PPE          bool       // Whether the chain runs on the PPE or not
 }
 
 // Type describing a slice of chains
@@ -73,8 +75,8 @@ func Path2String (path []int) string {
 }
 
 // Attempts to write chains to a file
-func WriteChains (filepath string, chains, periods, priorities []int,
-	paths [][]int, us []float64) error {
+func WriteChains (filepath string, random_seed int, ppe bool, chains, periods, 
+	priorities []int, paths [][]int, us []float64) error {
 	var cs Chains = []Chain{}
 
 	// Create the data structures
@@ -85,6 +87,8 @@ func WriteChains (filepath string, chains, periods, priorities []int,
 			Path:        paths[id],
 			Period_us:   periods[id],
 			Utilisation: us[id],
+			Random_seed: random_seed,
+			PPE:         ppe,
 		})
 	}
 
@@ -186,11 +190,13 @@ func Analyze (chains Chains, events []Event) []Result {
 		}
 		info("Analyzing chain %d (%d events)\n", chain.ID, len(chain_events))
 		// Roll through all events cyclically. Make sure it adheres to the path
+		mismatch_count := 0
 		for i, path := 0, chain.Path; i < len(chain_events); i++ {
 			expected_callback := path[i % len(chain.Path)]
 			if expected_callback != chain_events[i].Callback {
-				warn("%d </> %d ~ MISMATCH\n", expected_callback, 
-					chain_events[i].Callback)
+				// warn("%d </> %d ~ MISMATCH\n", expected_callback, 
+				// 	chain_events[i].Callback)
+				mismatch_count++
 			}
 
 			// Case: Reached one cycle of the path
@@ -213,6 +219,12 @@ func Analyze (chains Chains, events []Event) []Result {
 		if len(response_times) == 0 {
 			warn("No response times were computed for chain %d", chain.ID)
 			continue
+		}
+
+		// If the mismatch count is nonzero, report it
+		if mismatch_count > 0 {
+			warn("%d/%d events did not occur as expected!", mismatch_count,
+				len(chain_events))
 		}
 
 		// Calculate the BCRT, WCRT, and ACRT
