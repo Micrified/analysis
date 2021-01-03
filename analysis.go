@@ -231,13 +231,13 @@ func Analyze (chains Chains, events []Event) []Result {
 
 		// If there were no response times, do nothing
 		if len(response_times) == 0 {
-			fmt.Fprintf(os.Stderr, "No response times were computed for chain %d", chain.ID)
+			fmt.Fprintf(os.Stderr, "No response times were computed for chain %d\n", chain.ID)
 			continue
 		}
 
 		// If the mismatch count is nonzero, report it
 		if mismatch_count > 0 {
-			fmt.Fprintf(os.Stderr, "%d/%d events did not occur as expected!", mismatch_count,
+			fmt.Fprintf(os.Stderr, "%d/%d events did not occur as expected!\n", mismatch_count,
 				len(chain_events))
 		}
 
