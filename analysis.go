@@ -29,9 +29,13 @@ type Chain struct {
 	Prio         int        // The chain priority
 	Path         []int      // The callbacks that consist the chain
 	Period_us    int        // The period of the chain timer (microseconds)
-	Utilisation  float64    // How much time is spent on the CPU
+	Utilisation  float64    // Chain specific utilisation
 	Random_seed  int        // Seed used when generating this chain
-	PPE          bool       // Whether the chain runs on the PPE or not
+	PPE          bool       // [Test setting]: Whether the chain runs on the PPE or not
+	Avg_len      int        // [Test setting]: Average chain length
+	Merge_p      float64    // [Test setting]: Merge probability used
+	Sync_p       float64    // [Test setting]: Sync probability used
+	Variance     float64    // [Test setting]: Variance in length used
 }
 
 // Type describing a slice of chains
@@ -75,8 +79,14 @@ func Path2String (path []int) string {
 }
 
 // Attempts to write chains to a file
-func WriteChains (filepath string, random_seed int, ppe bool, chains, periods, 
-	priorities []int, paths [][]int, us []float64) error {
+func WriteChains (filepath string, 
+	random_seed int, 
+	ppe bool,
+	chain_avg_len int,
+	chain_merge_p, chain_sync_p, chain_variance float64,
+	chains, periods, priorities []int, 
+	paths [][]int, 
+	us []float64) error {
 	var cs Chains = []Chain{}
 
 	// Create the data structures
@@ -89,6 +99,10 @@ func WriteChains (filepath string, random_seed int, ppe bool, chains, periods,
 			Utilisation: us[id],
 			Random_seed: random_seed,
 			PPE:         ppe,
+			Avg_len:     chain_avg_len,
+			Merge_p:     chain_merge_p,
+			Sync_p:      chain_sync_p,
+			Variance:    chain_variance,
 		})
 	}
 
@@ -188,7 +202,7 @@ func Analyze (chains Chains, events []Event) []Result {
 				chain_events = append(chain_events, event)
 			}
 		}
-		info("Analyzing chain %d (%d events)\n", chain.ID, len(chain_events))
+		fmt.Fprintf(os.Stderr, "Analyzing chain %d (%d events)\n", chain.ID, len(chain_events))
 		// Roll through all events cyclically. Make sure it adheres to the path
 		mismatch_count := 0
 		for i, path := 0, chain.Path; i < len(chain_events); i++ {
@@ -217,13 +231,13 @@ func Analyze (chains Chains, events []Event) []Result {
 
 		// If there were no response times, do nothing
 		if len(response_times) == 0 {
-			warn("No response times were computed for chain %d", chain.ID)
+			fmt.Fprintf(os.Stderr, "No response times were computed for chain %d", chain.ID)
 			continue
 		}
 
 		// If the mismatch count is nonzero, report it
 		if mismatch_count > 0 {
-			warn("%d/%d events did not occur as expected!", mismatch_count,
+			fmt.Fprintf(os.Stderr, "%d/%d events did not occur as expected!", mismatch_count,
 				len(chain_events))
 		}
 
