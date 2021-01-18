@@ -28,7 +28,7 @@ type Chain struct {
 	ID           int        // The chain identifier
 	Prio         int        // The chain priority
 	Path         []int      // The callbacks that consist the chain
-	Period_us    int        // The period of the chain timer (microseconds)
+	Period_us    int64      // The period of the chain timer (microseconds)
 	Utilisation  float64    // Chain specific utilisation
 	Random_seed  int        // Seed used when generating this chain
 	PPE          bool       // [Test setting]: Whether the chain runs on the PPE or not
@@ -36,6 +36,7 @@ type Chain struct {
 	Merge_p      float64    // [Test setting]: Merge probability used
 	Sync_p       float64    // [Test setting]: Sync probability used
 	Variance     float64    // [Test setting]: Variance in length used
+	Executors    int        // [Test setting]: Total number of executors used
 }
 
 // Type describing a slice of chains
@@ -44,18 +45,17 @@ type Chains []Chain
 // Type describing a chain analysis
 type Result struct {
 	ID            int       // The chain identifier
-	WCRT_us       int       // The worst case response time (microseconds)
-	ACRT_us       int       // Average case response time (microseconds)
-	BCRT_us       int       // Best case response time (microseconds)
+	WCRT_us       int64     // The worst case response time (microseconds)
+	ACRT_us       int64     // Average case response time (microseconds)
+	BCRT_us       int64     // Best case response time (microseconds)
 }
 
 // Type describing a log call event
 type Event struct {
 	Executor      int       // The executor the event occurred on
 	Chain         int       // The chain the event belonged to
-	Callback      int       // The callback for the event
-	Start_us      int       // The start timestamp (microseconds)
-	Duration_us   int       // The duration (microseconds)
+	Start_us      int64     // The start timestamp (microseconds)
+	Duration_us   int64     // The duration of the chain (microseconds)
 }
 
 
@@ -82,7 +82,7 @@ func Path2String (path []int) string {
 func WriteChains (filepath string, 
 	random_seed int, 
 	ppe bool,
-	chain_avg_len int,
+	chain_avg_len, executor_count int,
 	chain_merge_p, chain_sync_p, chain_variance float64,
 	chains, periods, priorities []int, 
 	paths [][]int, 
@@ -95,7 +95,7 @@ func WriteChains (filepath string,
 			ID:          id,
 			Prio:        priorities[id],
 			Path:        paths[id],
-			Period_us:   periods[id],
+			Period_us:   int64(periods[id]),
 			Utilisation: us[id],
 			Random_seed: random_seed,
 			PPE:         ppe,
@@ -103,6 +103,7 @@ func WriteChains (filepath string,
 			Merge_p:     chain_merge_p,
 			Sync_p:      chain_sync_p,
 			Variance:    chain_variance,
+			Executors:   executor_count,
 		})
 	}
 
@@ -189,11 +190,10 @@ func ReadEvents (filepath string) ([]Event, error) {
 }
 
 // Converts (Chains, Logfile) into results
-func Analyze (chains Chains, events []Event) []Result {
+func Analyse (chains Chains, events []Event) []Result {
 	var results []Result = []Result{}
 
 	for _, chain := range chains {
-		response_times := []int{}
 
 		// Collect all events related to the chain
 		chain_events := []Event{}
@@ -203,42 +203,14 @@ func Analyze (chains Chains, events []Event) []Result {
 			}
 		}
 		fmt.Fprintf(os.Stderr, "Analyzing chain %d (%d events)\n", chain.ID, len(chain_events))
-		// Roll through all events cyclically. Make sure it adheres to the path
-		mismatch_count := 0
-		for i, path := 0, chain.Path; i < len(chain_events); i++ {
-			expected_callback := path[i % len(chain.Path)]
-			if expected_callback != chain_events[i].Callback {
-				// warn("%d </> %d ~ MISMATCH\n", expected_callback, 
-				// 	chain_events[i].Callback)
-				mismatch_count++
-			}
 
-			// Case: Reached one cycle of the path
-			if ((i+1) % len(chain.Path)) == 0 && i > 0 {
-
-				start_callback_index := (i - len(chain.Path) + 1)
-				end_callback_index   := i
-
-				// Calculate response time
-				response_time := ((chain_events[end_callback_index].Start_us + 
-					chain_events[end_callback_index].Duration_us) - 
-					chain_events[start_callback_index].Start_us)
-
-				// Add to response times
-				response_times = append(response_times, response_time)
-			}
-		}
+		// Obtain all response times
+		response_times := analyse_chain(chain, chain_events)
 
 		// If there were no response times, do nothing
 		if len(response_times) == 0 {
 			fmt.Fprintf(os.Stderr, "No response times were computed for chain %d\n", chain.ID)
 			continue
-		}
-
-		// If the mismatch count is nonzero, report it
-		if mismatch_count > 0 {
-			fmt.Fprintf(os.Stderr, "%d/%d events did not occur as expected!\n", mismatch_count,
-				len(chain_events))
 		}
 
 		// Calculate the BCRT, WCRT, and ACRT
@@ -252,7 +224,7 @@ func Analyze (chains Chains, events []Event) []Result {
 			}
 			acrt += response_times[i]
 		}
-		acrt /= len(response_times)
+		acrt /= int64(len(response_times))
 
 		results = append(results, Result{
 			ID:       chain.ID,
@@ -271,10 +243,22 @@ func Analyze (chains Chains, events []Event) []Result {
  *******************************************************************************
 */
 
+// Performs analysis on a single chain, given it's event stream
+// Since the logs now only report end-to-end response times, all I need
+// to do is extract them
+func analyse_chain (chain Chain, events []Event) []int64 {
+	response_times := []int64{}
+
+	for _, event := range events {
+		response_times = append(response_times, event.Duration_us)
+	}
+	return response_times
+}
+
 func parse_event (line []byte) (Event, error) {
 	var event Event
 	var split int = 0
-	var sfmt string = "{executor: %d, chain: %d, callback: %d, start: %d, duration: %d}"
+	var sfmt string = "{executor: %d, chain: %d, start: %d, duration: %d}"
 
 	// Discard bytes until an opening brace is hit (in line with log format)
 	for i, b := range line {
@@ -293,9 +277,9 @@ func parse_event (line []byte) (Event, error) {
 	log := string(line[split:])
 
 	// Parse the arguments
-	matched, err := fmt.Sscanf(log, sfmt, &(event.Executor), &(event.Chain), 
-		&(event.Callback), &(event.Start_us), &(event.Duration_us))
-	if nil != err || (matched != 5) {
+	matched, err := fmt.Sscanf(log, sfmt, &(event.Executor), &(event.Chain),
+		&(event.Start_us), &(event.Duration_us))
+	if nil != err || (matched != 4) {
 		return event, errors.New("Unable to match event format: " + err.Error() +
 		" in line:\n\"" + log + "\"\n")
 	}
