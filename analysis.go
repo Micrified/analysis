@@ -31,7 +31,7 @@ type Chain struct {
 	Period_us    int64      // The period of the chain timer (microseconds)
 	Utilisation  float64    // Chain specific utilisation
 	Random_seed  int        // Seed used when generating this chain
-	PPE          bool       // [Test setting]: Whether the chain runs on the PPE or not
+	PPE          int        // (0: none, 1: producer-consumer, 2: thread-dispatch)
 	Avg_len      int        // [Test setting]: Average chain length
 	Merge_p      float64    // [Test setting]: Merge probability used
 	Sync_p       float64    // [Test setting]: Sync probability used
@@ -80,8 +80,8 @@ func Path2String (path []int) string {
 
 // Attempts to write chains to a file
 func WriteChains (filepath string, 
-	random_seed int, 
-	ppe bool,
+	random_seed, 
+	ppe int,
 	chain_avg_len, executor_count int,
 	chain_merge_p, chain_sync_p, chain_variance float64,
 	chains, periods, priorities []int, 
